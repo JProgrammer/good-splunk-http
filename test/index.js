@@ -6,7 +6,7 @@ const Http = require('http');
 const Code = require('code');
 const Lab = require('lab');
 const lab = exports.lab = Lab.script();
-const GoodHttp = require('..');
+const GoodSplunkHttp = require('..');
 
 // Declare internals
 
@@ -44,64 +44,32 @@ const it = lab.it;
 const expect = Code.expect;
 
 
-describe('GoodHttp', () => {
+describe('GoodSplunkHttp', () => {
 
-    it('honors the threshold setting and sends the events in a batch', { plan: 10 }, (done) => {
+    it('sets the hecToken correctly', { plan: 1 }, (done) => {
 
         const stream = internals.readStream();
-        let hitCount = 0;
         const server = Http.createServer((req, res) => {
 
-            let data = '';
-            hitCount++;
+            expect(req.headers.authorization).to.equal('Splunk abcdef');
 
-            req.on('data', (chunk) => {
-
-                data += chunk;
-            });
-            req.on('end', () => {
-
-                const payload = JSON.parse(data);
-                const events = payload.events;
-
-                expect(req.headers['x-api-key']).to.equal('12345');
-                expect(payload.schema).to.equal('good-http');
-                expect(events.length).to.equal(5);
-
-                if (hitCount === 1) {
-                    expect(events[4].id).to.equal(4);
-                    expect(events[4].event).to.equal('log');
-                    res.end();
-                }
-                else if (hitCount === 2) {
-                    expect(events[4].id).to.equal(9);
-                    expect(events[4].event).to.equal('log');
-
-                    res.end();
-                    server.close(done);
-                }
-            });
+            req.on('data', () => {});
+            req.on('end', done);
         });
 
         server.listen(0, '127.0.0.1', () => {
 
-            const reporter = new GoodHttp(internals.getUri(server), {
-                threshold: 5,
-                wreck: {
-                    headers: {
-                        'x-api-key': 12345
-                    }
-                }
+            const reporter = new GoodSplunkHttp(internals.getUri(server), {
+                threshold: 0,
+                hecToken: 'abcdef'
             });
 
             stream.pipe(reporter);
 
-            for (let i = 0; i < 10; ++i) {
-                stream.push({
-                    id: i,
-                    event: 'log'
-                });
-            }
+            stream.push({
+                id: 1,
+                event: 'log'
+            });
         });
     });
 
@@ -119,10 +87,11 @@ describe('GoodHttp', () => {
             req.on('end', () => {
 
                 hitCount++;
-                const payload = JSON.parse(data);
-                expect(payload.events).to.exist();
-                expect(payload.events).to.have.length(1);
-                expect(payload.events[0].id).to.equal(hitCount - 1);
+                const events = data.split('\n\n').map(JSON.parse);
+
+                expect(events).to.exist();
+                expect(events).to.have.length(1);
+                expect(events[0].event.id).to.equal(hitCount - 1);
 
                 res.writeHead(200);
                 res.end();
@@ -134,7 +103,7 @@ describe('GoodHttp', () => {
 
         server.listen(0, '127.0.01', () => {
 
-            const reporter = new GoodHttp(internals.getUri(server), {
+            const reporter = new GoodSplunkHttp(internals.getUri(server), {
                 endpoint: internals.getUri(server),
                 threshold: 0
             });
@@ -163,12 +132,11 @@ describe('GoodHttp', () => {
             });
             req.on('end', () => {
 
-                let events = JSON.parse(data);
-                events = events.events;
+                const events = data.split('\n\n').map(JSON.parse);
 
                 expect(events).to.exist();
                 expect(events).to.have.length(5);
-                expect(events[0]._data).to.equal('[Circular]');
+                expect(events[0].event._data).to.equal('[Circular]');
 
                 expect(hitCount).to.equal(1);
 
@@ -180,7 +148,7 @@ describe('GoodHttp', () => {
 
         server.listen(0, '127.0.0.1', () => {
 
-            const reporter = new GoodHttp(internals.getUri(server), {
+            const reporter = new GoodSplunkHttp(internals.getUri(server), {
                 threshold: 5
             });
 
@@ -201,7 +169,7 @@ describe('GoodHttp', () => {
         });
     });
 
-    it('makes a last attempt to send any remaining log entries on "finish"',  { plan: 2 }, (done) => {
+    it('makes a last attempt to send any remaining log entries on "finish"',  { plan: 1 }, (done) => {
 
         const server = Http.createServer((req, res) => {
 
@@ -213,11 +181,8 @@ describe('GoodHttp', () => {
             });
             req.on('end', () => {
 
-                const payload = JSON.parse(data);
-                expect(payload).to.include({
-                    schema: 'good-http'
-                });
-                expect(payload.events).to.have.length(2);
+                const events = data.split('\n\n').map(JSON.parse);
+                expect(events).to.have.length(2);
                 res.end();
                 done();
             });
@@ -226,7 +191,7 @@ describe('GoodHttp', () => {
         server.listen(0, '127.0.0.1', () => {
 
             const stream = internals.readStream();
-            const reporter = new GoodHttp(internals.getUri(server));
+            const reporter = new GoodSplunkHttp(internals.getUri(server));
 
             stream.pipe(reporter);
             stream.push({
@@ -258,14 +223,13 @@ describe('GoodHttp', () => {
             });
             req.on('end', () => {
 
-                const payload = JSON.parse(data);
-                const events = payload.events;
+                const events = data.split('\n\n').map(JSON.parse);
 
                 expect(errorCallCount).to.equal(0);
                 expect(events).to.have.length(hitCount);
 
                 for (let i = 0; i < hitCount; ++i) {
-                    expect(events[i].id).to.equal(i);
+                    expect(events[i].event.id).to.equal(i);
                 }
 
                 req.socket.destroy();
@@ -275,7 +239,7 @@ describe('GoodHttp', () => {
         server.listen(0, '127.0.0.1', () => {
 
             const stream = internals.readStream();
-            const reporter = new GoodHttp(internals.getUri(server), {
+            const reporter = new GoodSplunkHttp(internals.getUri(server), {
                 threshold: 0,
                 errorThreshold: 2
             });
@@ -311,11 +275,10 @@ describe('GoodHttp', () => {
             });
             req.on('end', () => {
 
-                const payload = JSON.parse(data);
-                const events = payload.events;
+                const events = data.split('\n\n').map(JSON.parse);
 
                 expect(events).to.have.length(1);
-                expect(events[0].id).to.equal(hitCount - 1);
+                expect(events[0].event.id).to.equal(hitCount - 1);
                 req.socket.destroy();
             });
         });
@@ -323,7 +286,7 @@ describe('GoodHttp', () => {
         server.listen(0, '127.0.0.1', () => {
 
             const stream = internals.readStream();
-            const reporter = new GoodHttp(internals.getUri(server), {
+            const reporter = new GoodSplunkHttp(internals.getUri(server), {
                 threshold: 0,
                 errorThreshold: null
             });
@@ -359,7 +322,7 @@ describe('GoodHttp', () => {
         server.listen(0, '127.0.0.1', () => {
 
             const stream = internals.readStream();
-            const reporter = new GoodHttp(internals.getUri(server), {
+            const reporter = new GoodSplunkHttp(internals.getUri(server), {
                 threshold: 0
             });
 
