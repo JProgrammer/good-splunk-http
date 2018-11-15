@@ -31,7 +31,9 @@ const internals = {
     },
     readStream() {
 
-        const result = new Stream.Readable({ objectMode: true });
+        const result = new Stream.Readable({
+            objectMode: true
+        });
         result._read = () => {};
         return result;
     }
@@ -46,7 +48,9 @@ const expect = Code.expect;
 
 describe('GoodSplunkHttp', () => {
 
-    it('sets the hecToken correctly', { plan: 1 }, (done) => {
+    it('sets the hecToken correctly', {
+        plan: 1
+    }, (done) => {
 
         const stream = internals.readStream();
         const server = Http.createServer((req, res) => {
@@ -73,7 +77,9 @@ describe('GoodSplunkHttp', () => {
         });
     });
 
-    it('sends each event individually if threshold is 0',  { plan: 9 }, (done) => {
+    it('sends each event individually if threshold is 0', {
+        plan: 9
+    }, (done) => {
 
         const stream = internals.readStream();
         let hitCount = 0;
@@ -112,12 +118,16 @@ describe('GoodSplunkHttp', () => {
 
             for (let i = 0; i < 3; ++i) {
 
-                stream.push({ id: i });
+                stream.push({
+                    id: i
+                });
             }
         });
     });
 
-    it('handles circular object references safely',  { plan: 4 }, (done) => {
+    it('handles circular object references safely', {
+        plan: 4
+    }, (done) => {
 
         const stream = internals.readStream();
         let hitCount = 0;
@@ -169,7 +179,9 @@ describe('GoodSplunkHttp', () => {
         });
     });
 
-    it('makes a last attempt to send any remaining log entries on "finish"',  { plan: 1 }, (done) => {
+    it('makes a last attempt to send any remaining log entries on "finish"', {
+        plan: 1
+    }, (done) => {
 
         const server = Http.createServer((req, res) => {
 
@@ -208,7 +220,9 @@ describe('GoodSplunkHttp', () => {
         });
     });
 
-    it('doesn\'t clear data on error until errorThreshold is reached', { plan: 15 }, (done) => {
+    it('doesn\'t clear data on error until errorThreshold is reached', {
+        plan: 15
+    }, (done) => {
 
         let hitCount = 0;
         let errorCallCount = 0;
@@ -256,12 +270,16 @@ describe('GoodSplunkHttp', () => {
             stream.pipe(reporter);
 
             for (let i = 0; i < 3; ++i) {
-                stream.push({ id: i });
+                stream.push({
+                    id: i
+                });
             }
         });
     });
 
-    it('it always ignores errors and clears logs if errorThreshold is null', { plan: 5 }, (done) => {
+    it('it always ignores errors and clears logs if errorThreshold is null', {
+        plan: 5
+    }, (done) => {
 
         let hitCount = 0;
         const server = Http.createServer((req, res) => {
@@ -304,13 +322,19 @@ describe('GoodSplunkHttp', () => {
 
             stream.pipe(reporter);
 
-            stream.push({ id: 0 });
-            stream.push({ id: 1 });
+            stream.push({
+                id: 0
+            });
+            stream.push({
+                id: 1
+            });
             stream.push(null);
         });
     });
 
-    it('reporters errors by default', { plan: 1 }, (done) => {
+    it('reporters errors by default', {
+        plan: 1
+    }, (done) => {
 
         let hitCount = 0;
         const server = Http.createServer((req, res) => {
@@ -333,8 +357,104 @@ describe('GoodSplunkHttp', () => {
             });
 
             stream.pipe(reporter);
-            stream.push({ id: 0 });
+            stream.push({
+                id: 0
+            });
             stream.push(null);
+        });
+    });
+
+    it('flushes after timeout', {
+        plan: 3
+    }, (done) => {
+
+        const stream = internals.readStream();
+        let hitCount = 0;
+        const server = Http.createServer((req, res) => {
+
+            let data = '';
+            hitCount++;
+
+            req.on('data', (chunk) => {
+
+                data += chunk;
+            });
+            req.on('end', () => {
+
+                const events = data.split('\n\n').map(JSON.parse);
+
+                expect(events).to.exist();
+                expect(events).to.have.length(4);
+
+                expect(hitCount).to.equal(1);
+
+                res.end();
+
+                server.close(done);
+            });
+        });
+
+        server.listen(0, '127.0.0.1', () => {
+
+            const reporter = new GoodSplunkHttp(internals.getUri(server), {
+                threshold: 5
+            });
+
+            stream.pipe(reporter);
+
+            for (let i = 0; i < 4; ++i) {
+
+                const data = {
+                    event: 'log',
+                    timestamp: Date.now(),
+                    id: i
+                };
+
+                stream.push(data);
+            }
+        });
+    });
+
+    it('doesn\'t clear data on error until errorThreshold is reached with timeout', {
+        plan: 1
+    }, (done) => {
+
+        const server = Http.createServer((req, res) => {
+
+            let data = '';
+
+            req.on('data', (chunk) => {
+
+                data += chunk;
+            });
+            req.on('end', () => {
+
+                const events = data.split('\n\n').map(JSON.parse);
+
+                expect(events).to.have.length(3);
+
+                req.socket.destroy();
+
+                setImmediate(() => server.close(done));
+            });
+        });
+
+        server.listen(0, '127.0.0.1', () => {
+
+            const stream = internals.readStream();
+            const reporter = new GoodSplunkHttp(internals.getUri(server), {
+                threshold: 4,
+                errorThreshold: 1,
+                sendDelay: 100
+            });
+
+            stream.pipe(reporter);
+
+            for (let i = 0; i < 3; ++i) {
+                stream.push({
+                    id: i
+                });
+            }
         });
     });
 });
